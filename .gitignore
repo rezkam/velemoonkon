@@ -1,0 +1,43 @@
+# Binaries (executables only, not directories)
+lightning/lightning
+lightning/dns-scanner
+/bin/
+
+# Results
+*.json
+*.md
+
+# Claude instructions
+.claude/
+*.claude.md
+CLAUDE.md
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

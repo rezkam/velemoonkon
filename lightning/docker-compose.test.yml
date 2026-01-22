@@ -1,0 +1,119 @@
+services:
+  # DNS Servers for testing
+  bind9-recursive:
+    image: ubuntu/bind9:latest
+    container_name: dns-test-bind9-recursive
+    ports:
+      - "15353:53/udp"
+      - "15353:53/tcp"
+      - "8853:853/tcp"  # DoT
+    volumes:
+      - ./test/configs/bind9-recursive:/etc/bind
+    networks:
+      - dns-test-net
+
+  unbound-recursive:
+    image: mvance/unbound:latest
+    container_name: dns-test-unbound
+    ports:
+      - "15454:53/udp"
+      - "15454:53/tcp"
+    volumes:
+      - ./test/configs/unbound:/opt/unbound/etc/unbound
+    networks:
+      - dns-test-net
+
+  coredns:
+    image: coredns/coredns:latest
+    container_name: dns-test-coredns
+    ports:
+      - "15555:53/udp"
+      - "15555:53/tcp"
+    volumes:
+      - ./test/configs/coredns:/etc/coredns
+    command: -conf /etc/coredns/Corefile
+    networks:
+      - dns-test-net
+
+  # DNS-over-HTTPS server
+  dns-over-https:
+    image: satishweb/doh-server:latest
+    container_name: dns-test-doh
+    ports:
+      - "8443:8443/tcp"
+    environment:
+      - UPSTREAM_DNS_SERVER=udns://1.1.1.1:53
+      - DOH_HTTP_PREFIX=/dns-query
+      - DOH_SERVER_LISTEN=:8443
+    networks:
+      - dns-test-net
+
+  # DNSTT Tunnel Server
+  dnstt-server:
+    build:
+      context: ./test/tunnels/dnstt
+      dockerfile: Dockerfile
+    container_name: tunnel-test-dnstt
+    ports:
+      - "15301:53/udp"
+    environment:
+      - DNSTT_DOMAIN=t.example.com
+      - DNSTT_PUBKEY_FILE=/etc/dnstt/server.pub
+    volumes:
+      - ./test/tunnels/dnstt/keys:/etc/dnstt
+    networks:
+      - dns-test-net
+
+  # Iodine Tunnel Server
+  iodine-server:
+    build:
+      context: ./test/tunnels/iodine
+      dockerfile: Dockerfile
+    container_name: tunnel-test-iodine
+    ports:
+      - "15302:53/udp"
+    environment:
+      - IODINE_DOMAIN=i.example.com
+      - IODINE_PASSWORD=testpassword123
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - dns-test-net
+
+  # DNScat2 Tunnel Server (disabled due to ARM64 compatibility issues)
+  # dnscat2-server:
+  #   build:
+  #     context: ./test/tunnels/dnscat2
+  #     dockerfile: Dockerfile
+  #   container_name: tunnel-test-dnscat2
+  #   ports:
+  #     - "5303:53/udp"
+  #   environment:
+  #     - DNSCAT2_DOMAIN=d.example.com
+  #     - DNSCAT2_SECRET=secret123
+  #   networks:
+  #     - dns-test-net
+
+  # DNS2TCP Tunnel Server
+  dns2tcp-server:
+    build:
+      context: ./test/tunnels/dns2tcp
+      dockerfile: Dockerfile
+    container_name: tunnel-test-dns2tcp
+    ports:
+      - "15304:53/udp"
+      - "15304:53/tcp"
+    environment:
+      - DNS2TCP_DOMAIN=tcp.example.com
+      - DNS2TCP_KEY=/etc/dns2tcp/server.key
+    volumes:
+      - ./test/tunnels/dns2tcp/keys:/etc/dns2tcp
+    networks:
+      - dns-test-net
+
+networks:
+  dns-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
