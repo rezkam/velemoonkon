@@ -1,8 +1,18 @@
-.PHONY: all build test test-unit test-integration test-docker-up test-docker-down test-full clean
+.PHONY: all build build-release test test-unit test-integration test-docker-up test-docker-down test-full clean deps lint fmt coverage bench help
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+LDFLAGS_RELEASE := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 # Build the binary
 build:
 	go build -o lightning ./cmd/lightning
+
+# Build optimized release binary
+build-release:
+	go build -ldflags="$(LDFLAGS_RELEASE)" -trimpath -o lightning ./cmd/lightning
 
 # Run all tests
 test: test-unit
@@ -72,7 +82,8 @@ test-quick:
 
 help:
 	@echo "Available targets:"
-	@echo "  build            - Build the DNS scanner binary"
+	@echo "  build            - Build the DNS scanner binary (with debug symbols)"
+	@echo "  build-release    - Build optimized release binary (stripped, with version info)"
 	@echo "  test             - Run unit tests"
 	@echo "  test-unit        - Run unit tests only"
 	@echo "  test-integration - Run integration tests with Docker"
