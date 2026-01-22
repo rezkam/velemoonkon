@@ -17,23 +17,24 @@ type ScanResult struct {
 
 // Config contains scanner configuration
 type Config struct {
-	Workers        int
-	Timeout        int // seconds per IP
-	RateLimit      int // max IPs per second
-	EnableUDP      bool
-	EnableTCP      bool
-	EnableDoT      bool
-	EnableDoH      bool
-	EnableTunnel   bool
-	TunnelDNSTT    bool
-	TunnelIodine   bool
-	TunnelDNScat2  bool
-	TunnelDNS2TCP  bool
-	EnablePortScan bool
-	TunnelDomain   string
-	TestDomains    []string
-	Verbose        bool
-	Quiet          bool
+	Workers         int
+	DNSConcurrency  int // max concurrent DNS tests per IP
+	Timeout         int // seconds per IP
+	RateLimit       int // max IPs per second
+	EnableUDP       bool
+	EnableTCP       bool
+	EnableDoT       bool
+	EnableDoH       bool
+	EnableTunnel    bool
+	TunnelDNSTT     bool
+	TunnelIodine    bool
+	TunnelDNScat2   bool
+	TunnelDNS2TCP   bool
+	EnablePortScan  bool
+	TunnelDomain    string
+	TestDomains     []string
+	Verbose         bool
+	Quiet           bool
 }
 
 // DefaultConfig returns default scanner configuration

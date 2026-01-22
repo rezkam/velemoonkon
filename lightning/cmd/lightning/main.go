@@ -36,9 +36,10 @@ var (
 	scanPorts bool
 
 	// Performance
-	workers   int
-	timeout   int
-	rateLimit int
+	workers        int
+	dnsConcurrency int
+	timeout        int
+	rateLimit      int
 )
 
 var rootCmd = &cobra.Command{
@@ -120,7 +121,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&scanPorts, "scan-ports", true, "scan common DNS-related ports")
 
 	// Performance tuning
-	rootCmd.Flags().IntVarP(&workers, "workers", "w", 100, "number of concurrent workers")
+	rootCmd.Flags().IntVarP(&workers, "workers", "w", 100, "number of concurrent IP workers")
+	rootCmd.Flags().IntVar(&dnsConcurrency, "dns-concurrency", 4, "max concurrent DNS tests per IP (udp,tcp,dot,doh run in parallel)")
 	rootCmd.Flags().IntVarP(&timeout, "timeout", "t", 5, "timeout per IP in seconds")
 	rootCmd.Flags().IntVar(&rateLimit, "rate-limit", 1000, "max IPs per second")
 }
@@ -174,23 +176,24 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Create scanner config
 	config := scanner.Config{
-		Workers:        workers,
-		Timeout:        timeout,
-		RateLimit:      rateLimit,
-		EnableUDP:      enableUDP,
-		EnableTCP:      enableTCP,
-		EnableDoT:      enableDoT,
-		EnableDoH:      enableDoH,
-		EnableTunnel:   enableTunnel,
-		TunnelDNSTT:    enableDNSTT,
-		TunnelIodine:   enableIodine,
-		TunnelDNScat2:  enableDNScat2,
-		TunnelDNS2TCP:  enableDNS2TCP,
-		EnablePortScan: scanPorts,
-		TunnelDomain:   tunnelDomain,
-		TestDomains:    domains,
-		Verbose:        verbose,
-		Quiet:          quiet,
+		Workers:         workers,
+		DNSConcurrency:  dnsConcurrency,
+		Timeout:         timeout,
+		RateLimit:       rateLimit,
+		EnableUDP:       enableUDP,
+		EnableTCP:       enableTCP,
+		EnableDoT:       enableDoT,
+		EnableDoH:       enableDoH,
+		EnableTunnel:    enableTunnel,
+		TunnelDNSTT:     enableDNSTT,
+		TunnelIodine:    enableIodine,
+		TunnelDNScat2:   enableDNScat2,
+		TunnelDNS2TCP:   enableDNS2TCP,
+		EnablePortScan:  scanPorts,
+		TunnelDomain:    tunnelDomain,
+		TestDomains:     domains,
+		Verbose:         verbose,
+		Quiet:           quiet,
 	}
 
 	// Create scanner

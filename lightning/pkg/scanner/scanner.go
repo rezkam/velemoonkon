@@ -9,6 +9,7 @@ import (
 
 	"github.com/velemoonkon/lightning/pkg/dns"
 	"github.com/velemoonkon/lightning/pkg/tunnel"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
 
@@ -187,36 +188,74 @@ func (s *Scanner) scanIP(ctx context.Context, ip string) *ScanResult {
 	return result
 }
 
-// testDNS performs DNS tests using registered scanners
+// testDNS performs DNS tests using registered scanners with bounded concurrency using errgroup
 func (s *Scanner) testDNS(ctx context.Context, ip string) (*dns.TestResult, error) {
 	result := &dns.TestResult{
-		IP: ip,
+		IP:                  ip,
 		TestDomainsResolved: []string{},
 		TestDomainsFailed:   []string{},
 	}
 
-	// Run each registered scanner
+	if len(s.dnsScanners) == 0 {
+		return result, nil
+	}
+
+	// Use errgroup with SetLimit for bounded concurrency
+	g, ctx := errgroup.WithContext(ctx)
+	concurrency := s.config.DNSConcurrency
+	if concurrency <= 0 || concurrency > len(s.dnsScanners) {
+		concurrency = len(s.dnsScanners)
+	}
+	g.SetLimit(concurrency)
+
+	// Channel for collecting results (buffered to prevent blocking)
+	type scannerResult struct {
+		name       string
+		scanResult *dns.ScanResult
+	}
+	resultChan := make(chan scannerResult, len(s.dnsScanners))
+
+	// Launch scanners with bounded concurrency
 	for _, scanner := range s.dnsScanners {
-		scanResult, err := scanner.Scan(ctx, ip)
-		if err != nil && s.config.Verbose {
-			fmt.Printf("[%s] %s scanner error: %v\n", ip, scanner.Name(), err)
-			continue
-		}
+		scanner := scanner // Capture loop variable
+		g.Go(func() error {
+			scanResult, err := scanner.Scan(ctx, ip)
+			if err != nil {
+				if s.config.Verbose {
+					fmt.Printf("[%s] %s scanner error: %v\n", ip, scanner.Name(), err)
+				}
+				// Don't fail the entire scan if one scanner fails
+				return nil
+			}
 
-		if scanResult == nil || !scanResult.Success {
-			continue
-		}
+			if scanResult != nil && scanResult.Success {
+				resultChan <- scannerResult{
+					name:       scanner.Name(),
+					scanResult: scanResult,
+				}
+			}
+			return nil
+		})
+	}
 
-		// Merge results based on scanner type
-		switch scanner.Name() {
+	// Wait for all scanners to complete
+	if err := g.Wait(); err != nil {
+		close(resultChan)
+		return result, err
+	}
+	close(resultChan)
+
+	// Merge results
+	for sr := range resultChan {
+		switch sr.name {
 		case "udp":
 			result.UDPPortOpen = true
 			result.RespondsToQueries = true
-			result.SupportsRecursion = scanResult.Recursive
-			result.SupportsEDNS = scanResult.SupportsEDNS
-			result.TestDomainsResolved = append(result.TestDomainsResolved, scanResult.DomainsResolved...)
+			result.SupportsRecursion = sr.scanResult.Recursive
+			result.SupportsEDNS = sr.scanResult.SupportsEDNS
+			result.TestDomainsResolved = append(result.TestDomainsResolved, sr.scanResult.DomainsResolved...)
 			if result.DNSServerType == "" {
-				if scanResult.Recursive {
+				if sr.scanResult.Recursive {
 					result.DNSServerType = "recursive"
 				} else {
 					result.DNSServerType = "authoritative"
@@ -227,16 +266,16 @@ func (s *Scanner) testDNS(ctx context.Context, ip string) (*dns.TestResult, erro
 			result.SupportsTCP = true
 		case "dot":
 			result.SupportsDoT = true
-			result.DoTResponseTime = scanResult.ResponseTime
-			if scanResult.Error != "" {
-				result.DoTError = scanResult.Error
+			result.DoTResponseTime = sr.scanResult.ResponseTime
+			if sr.scanResult.Error != "" {
+				result.DoTError = sr.scanResult.Error
 			}
 		case "doh":
 			result.SupportsDoH = true
-			result.DoHEndpoint = scanResult.Endpoint
-			result.DoHResponseTime = scanResult.ResponseTime
-			if scanResult.Error != "" {
-				result.DoHError = scanResult.Error
+			result.DoHEndpoint = sr.scanResult.Endpoint
+			result.DoHResponseTime = sr.scanResult.ResponseTime
+			if sr.scanResult.Error != "" {
+				result.DoHError = sr.scanResult.Error
 			}
 		}
 	}
@@ -244,11 +283,15 @@ func (s *Scanner) testDNS(ctx context.Context, ip string) (*dns.TestResult, erro
 	return result, nil
 }
 
-// detectTunnel performs tunnel detection using registered detectors
+// detectTunnel performs tunnel detection using registered detectors with bounded concurrency using errgroup
 func (s *Scanner) detectTunnel(ctx context.Context, ip string) (*tunnel.Result, error) {
 	result := &tunnel.Result{
 		IP:            ip,
 		AllIndicators: []string{},
+	}
+
+	if len(s.tunnelDetectors) == 0 {
+		return result, nil
 	}
 
 	domain := s.config.TunnelDomain
@@ -256,24 +299,52 @@ func (s *Scanner) detectTunnel(ctx context.Context, ip string) (*tunnel.Result, 
 		domain = "test.example.com"
 	}
 
-	// Run each registered detector
+	// Use errgroup with SetLimit for bounded concurrency
+	g, ctx := errgroup.WithContext(ctx)
+	concurrency := s.config.DNSConcurrency
+	if concurrency <= 0 || concurrency > len(s.tunnelDetectors) {
+		concurrency = len(s.tunnelDetectors)
+	}
+	g.SetLimit(concurrency)
+
+	// Channel for collecting results (buffered to prevent blocking)
+	resultChan := make(chan *tunnel.DetectionResult, len(s.tunnelDetectors))
+
+	// Launch detectors with bounded concurrency
+	for _, detector := range s.tunnelDetectors {
+		detector := detector // Capture loop variable
+		g.Go(func() error {
+			detectionResult, err := detector.Detect(ctx, ip, domain)
+			if err != nil {
+				if s.config.Verbose {
+					fmt.Printf("[%s] %s detector error: %v\n", ip, detector.Name(), err)
+				}
+				// Don't fail the entire detection if one detector fails
+				return nil
+			}
+
+			if detectionResult != nil && detectionResult.IsTunnel {
+				resultChan <- detectionResult
+			}
+			return nil
+		})
+	}
+
+	// Wait for all detectors to complete
+	if err := g.Wait(); err != nil {
+		close(resultChan)
+		return result, err
+	}
+	close(resultChan)
+
+	// Collect and merge results
 	var bestResult *tunnel.DetectionResult
 	bestConfidence := 0 // 0=none, 1=low, 2=medium, 3=high
 
-	for _, detector := range s.tunnelDetectors {
-		detectionResult, err := detector.Detect(ctx, ip, domain)
-		if err != nil && s.config.Verbose {
-			fmt.Printf("[%s] %s detector error: %v\n", ip, detector.Name(), err)
-			continue
-		}
-
-		if detectionResult == nil || !detectionResult.IsTunnel {
-			continue
-		}
-
+	for dr := range resultChan {
 		// Determine confidence score
 		confidence := 0
-		switch detectionResult.Confidence {
+		switch dr.Confidence {
 		case "low":
 			confidence = 1
 		case "medium":
@@ -285,11 +356,11 @@ func (s *Scanner) detectTunnel(ctx context.Context, ip string) (*tunnel.Result, 
 		// Keep the highest confidence result
 		if confidence > bestConfidence {
 			bestConfidence = confidence
-			bestResult = detectionResult
+			bestResult = dr
 		}
 
 		// Merge indicators
-		result.AllIndicators = append(result.AllIndicators, detectionResult.Indicators...)
+		result.AllIndicators = append(result.AllIndicators, dr.Indicators...)
 	}
 
 	// Set final result
