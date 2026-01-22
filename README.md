@@ -22,21 +22,87 @@ Lightning scans DNS servers across multiple protocols (UDP, TCP, DoT, DoH) and d
 
 ## Usage
 
+### Basic Scanning
+
 ```bash
 # Scan a single DNS server
 lightning 8.8.8.8
 
-# Scan multiple IPs or CIDR ranges
-lightning 192.168.1.0/24,8.8.8.8
+# Scan multiple IPs (comma-separated)
+lightning 8.8.8.8,1.1.1.1
 
-# Scan with custom test domains
-lightning 1.1.1.1 --test-domains example.com,test.org
+# Scan CIDR range
+lightning 192.168.1.0/24
 
-# Specify DNS protocols to test
-lightning 8.8.8.8 --protocols udp,tcp,dot
+# Scan from file (one IP/CIDR per line)
+lightning -f targets.txt
+```
 
-# Enable tunnel detection
-lightning 8.8.8.8 --detect-tunnels
+### DNS Protocol Selection
+
+```bash
+# Test all DNS protocols (default)
+lightning 8.8.8.8 --scanner all
+
+# Test only UDP and TCP
+lightning 8.8.8.8 --scanner udp,tcp
+
+# Test only DNS-over-TLS and DNS-over-HTTPS
+lightning 1.1.1.1 --scanner dot,doh
+
+# Use custom test domains for resolution checks
+lightning 8.8.8.8 --test-domains example.com,test.org
+```
+
+### Tunnel Detection
+
+```bash
+# Enable all tunnel detectors
+lightning 1.1.1.1 --detector all
+
+# Detect specific tunnel types
+lightning 1.1.1.1 --detector dnstt,iodine
+
+# Detect tunnels with specific domain
+lightning 1.1.1.1 --detector all --tunnel-domain tunnel.example.com
+
+# Combine DNS scanning with tunnel detection
+lightning 8.8.8.8 --scanner all --detector all
+```
+
+### Performance Tuning
+
+```bash
+# High-performance scan of large CIDR
+lightning 5.62.160.0/19 -w 500 --rate-limit 2000
+
+# Adjust timeout for slow networks
+lightning 192.168.1.0/24 --timeout 10
+
+# Control concurrent DNS tests per IP
+lightning 8.8.8.8 --dns-concurrency 8
+```
+
+### Output Options
+
+```bash
+# JSON output (default)
+lightning 8.8.8.8 --output-format json
+
+# Markdown report
+lightning 8.8.8.8 --output-format md
+
+# Both JSON and Markdown
+lightning 8.8.8.8 --output-format json,md
+
+# Custom output file prefix
+lightning 8.8.8.8 -o my-scan
+
+# Quiet mode (suppress progress)
+lightning 8.8.8.8 -q
+
+# Verbose logging
+lightning 8.8.8.8 -v
 ```
 
 ## Output Formats
