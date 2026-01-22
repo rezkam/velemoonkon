@@ -5,7 +5,6 @@
 
 # Results
 *.json
-*.md
 
 # Claude instructions
 .claude/
