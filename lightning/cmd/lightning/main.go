@@ -17,6 +17,10 @@ import (
 )
 
 var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+
 	// File input
 	inputFile string
 
@@ -43,8 +47,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "lightning [flags] <target>",
-	Short: "Fast DNS scanner with tunnel detection",
+	Use:     "lightning [flags] <target>",
+	Short:   "Fast DNS scanner with tunnel detection",
+	Version: version,
 	Long: `Lightning - Production-ready DNS testing and tunnel detection tool
 
 Scans IPs for DNS functionality (UDP, TCP, DoT, DoH) and detects DNS tunnels
@@ -93,7 +98,8 @@ By default, outputs JSON reports with DNS scanning enabled and tunnel detection 
 }
 
 func init() {
-	// Set custom usage template
+	rootCmd.SetVersionTemplate(fmt.Sprintf("lightning %s (commit: %s, built: %s)\n", version, commit, date))
+
 	rootCmd.SetHelpCommand(&cobra.Command{
 		Use:    "help [command]",
 		Short:  "Help about any command",
