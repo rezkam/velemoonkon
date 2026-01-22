@@ -1,6 +1,6 @@
 # Binaries (executables only, not directories)
-lightning/lightning
-lightning/dns-scanner
+/lightning
+/dns-scanner
 /bin/
 
 # Results

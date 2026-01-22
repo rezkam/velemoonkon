@@ -21,7 +21,7 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
-          cache-dependency-path: lightning/go.sum
+          cache-dependency-path: go.sum
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -29,6 +29,5 @@ jobs:
           distribution: goreleaser
           version: latest
           args: release --clean
-          workdir: lightning
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

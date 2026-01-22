@@ -51,7 +51,7 @@ func TestUDPScanner(t *testing.T) {
 	}
 
 	opts := dns.DefaultQueryOptions()
-	scanner := dns.NewUDPScanner(opts)
+	scanner := dns.NewUDPScanner(opts, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestTCPScanner(t *testing.T) {
 	}
 
 	opts := dns.DefaultQueryOptions()
-	scanner := dns.NewTCPScanner(opts)
+	scanner := dns.NewTCPScanner(opts, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestDoTScanner(t *testing.T) {
 
 	t.Run("BIND9 DoT", func(t *testing.T) {
 		opts := dns.DefaultQueryOptions()
-		scanner := dns.NewDoTScanner(opts)
+		scanner := dns.NewDoTScanner(opts, nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -147,7 +147,7 @@ func TestDoTScanner(t *testing.T) {
 	// Test against public DoT servers
 	t.Run("Cloudflare DoT", func(t *testing.T) {
 		opts := dns.DefaultQueryOptions()
-		scanner := dns.NewDoTScanner(opts)
+		scanner := dns.NewDoTScanner(opts, nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -168,7 +168,7 @@ func TestDoHScanner(t *testing.T) {
 	// Test against public DoH servers
 	t.Run("Cloudflare DoH", func(t *testing.T) {
 		opts := dns.DefaultQueryOptions()
-		scanner := dns.NewDoHScanner(opts)
+		scanner := dns.NewDoHScanner(opts, nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -183,7 +183,7 @@ func TestDoHScanner(t *testing.T) {
 
 	t.Run("Google DoH", func(t *testing.T) {
 		opts := dns.DefaultQueryOptions()
-		scanner := dns.NewDoHScanner(opts)
+		scanner := dns.NewDoHScanner(opts, nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -198,7 +198,7 @@ func TestDoHScanner(t *testing.T) {
 
 func TestDNSScannerRegistry(t *testing.T) {
 	t.Run("Registry Has All Scanners", func(t *testing.T) {
-		registry := dns.NewDefaultRegistry()
+		registry := dns.NewDefaultRegistry(nil)
 
 		expectedScanners := []string{"udp", "tcp", "dot", "doh"}
 		for _, name := range expectedScanners {
@@ -210,7 +210,7 @@ func TestDNSScannerRegistry(t *testing.T) {
 	})
 
 	t.Run("GetByNames", func(t *testing.T) {
-		registry := dns.NewDefaultRegistry()
+		registry := dns.NewDefaultRegistry(nil)
 
 		scanners := registry.GetByNames([]string{"udp", "tcp"})
 		assert.Len(t, scanners, 2)
@@ -219,7 +219,7 @@ func TestDNSScannerRegistry(t *testing.T) {
 	})
 
 	t.Run("All Scanners", func(t *testing.T) {
-		registry := dns.NewDefaultRegistry()
+		registry := dns.NewDefaultRegistry(nil)
 
 		allScanners := registry.All()
 		assert.Len(t, allScanners, 4)
