@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/velemoonkon/lightning/pkg/config"
 	"github.com/velemoonkon/lightning/pkg/scanner"
 )
 
@@ -15,6 +16,9 @@ func WriteMarkdown(results []*scanner.ScanResult, filename string, startTime tim
 	duration := endTime.Sub(startTime)
 
 	var md strings.Builder
+	// Preallocate buffer based on configuration (default: 8KB for typical report size)
+	// Configurable via LIGHTNING_MARKDOWN_BUFFER_SIZE environment variable
+	md.Grow(config.Scanner.MarkdownBufferSize)
 
 	// Header
 	md.WriteString("# Lightning Report\n\n")
