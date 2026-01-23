@@ -2,6 +2,8 @@ package dns
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 )
 
@@ -51,11 +53,7 @@ func (r *Registry) Get(name string) (Scanner, bool) {
 
 // All returns all registered scanners
 func (r *Registry) All() []Scanner {
-	scanners := make([]Scanner, 0, len(r.scanners))
-	for _, scanner := range r.scanners {
-		scanners = append(scanners, scanner)
-	}
-	return scanners
+	return slices.Collect(maps.Values(r.scanners))
 }
 
 // GetByNames returns scanners by their names
