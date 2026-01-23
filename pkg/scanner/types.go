@@ -8,19 +8,20 @@ import (
 // ScanResult contains all results for a single IP scan
 type ScanResult struct {
 	IP           string              `json:"ip"`
-	DNSResult    *dns.TestResult     `json:"dns_result,omitempty"`
-	TunnelResult *tunnel.Result      `json:"tunnel_result,omitempty"`
-	OpenPorts    []int               `json:"open_ports,omitempty"`
+	DNSResult    *dns.TestResult     `json:"dns_result,omitzero"`
+	TunnelResult *tunnel.Result      `json:"tunnel_result,omitzero"`
+	OpenPorts    []int               `json:"open_ports,omitzero"`
 	ScanTime     int64               `json:"scan_time_ms"`
-	Error        string              `json:"error,omitempty"`
+	ScanErrors   []string            `json:"scan_errors,omitzero"` // Individual scanner/detector errors
+	Error        string              `json:"error,omitzero"`        // Fatal error that stopped scan
 }
 
 // Config contains scanner configuration
 type Config struct {
-	Workers         int
-	DNSConcurrency  int // max concurrent DNS tests per IP
-	Timeout         int // seconds per IP
-	RateLimit       int // max IPs per second
+	Workers         int    // Number of concurrent IP workers (0 or negative = auto: max(4, 4*GOMAXPROCS) for I/O-bound work)
+	DNSConcurrency  int    // Max concurrent DNS tests per IP (bounded by errgroup)
+	Timeout         int    // Timeout in seconds per IP
+	RateLimit       int    // Max IPs per second (0 or negative = no limit, uses rate.Inf)
 	EnableUDP       bool
 	EnableTCP       bool
 	EnableDoT       bool
