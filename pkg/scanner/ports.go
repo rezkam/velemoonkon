@@ -3,9 +3,12 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"iter"
 	"net"
-	"sync"
+	"slices"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Common DNS-related ports
@@ -15,6 +18,17 @@ var DNSPorts = []int{
 	443,  // DNS over HTTPS (DoH) / HTTPS
 	5353, // mDNS
 	8053, // Alternative DNS port
+}
+
+// chanToSeq converts a channel to an iterator for use with slices.Collect
+func chanToSeq[T any](ch <-chan T) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for v := range ch {
+			if !yield(v) {
+				return
+			}
+		}
+	}
 }
 
 // ScanPort checks if a TCP port is open
@@ -34,29 +48,33 @@ func ScanPort(ctx context.Context, ip string, port int, timeout time.Duration) b
 	return true
 }
 
-// ScanPorts scans multiple ports concurrently
+// ScanPorts scans multiple ports concurrently with bounded concurrency
 func ScanPorts(ctx context.Context, ip string, ports []int, timeout time.Duration) []int {
-	var (
-		openPorts []int
-		mu        sync.Mutex
-		wg        sync.WaitGroup
-	)
+	// Use errgroup with limited concurrency to prevent unbounded goroutine fan-out
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Limit concurrency to 5 (reasonable for port scanning)
+	// This prevents issues if DNSPorts list grows larger
+	g.SetLimit(min(5, len(ports)))
+
+	// Channel to collect open ports
+	openPortsChan := make(chan int, len(ports))
 
 	for _, port := range ports {
-		wg.Add(1)
-		go func(p int) {
-			defer wg.Done()
-
-			if ScanPort(ctx, ip, p, timeout) {
-				mu.Lock()
-				openPorts = append(openPorts, p)
-				mu.Unlock()
+		g.Go(func() error {
+			if ScanPort(ctx, ip, port, timeout) {
+				openPortsChan <- port
 			}
-		}(port)
+			return nil
+		})
 	}
 
-	wg.Wait()
-	return openPorts
+	// Wait for all scans to complete
+	g.Wait()
+	close(openPortsChan)
+
+	// Collect results using slices.Collect with channel iterator
+	return slices.Collect(chanToSeq(openPortsChan))
 }
 
 // ScanDNSPorts scans common DNS-related ports
