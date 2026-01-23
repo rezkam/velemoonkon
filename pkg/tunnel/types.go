@@ -4,16 +4,16 @@ package tunnel
 type Result struct {
 	IP              string      `json:"ip"`
 	IsTunnel        bool        `json:"is_tunnel"`
-	TunnelType      string      `json:"tunnel_type,omitempty"`      // dnstt/iodine/dnscat2/dns2tcp
-	Confidence      string      `json:"confidence,omitempty"`       // high/medium/low
+	TunnelType      string      `json:"tunnel_type,omitzero"`      // dnstt/iodine/dnscat2/dns2tcp
+	Confidence      string      `json:"confidence,omitzero"`       // high/medium/low
 	RespondsToDNS   bool        `json:"responds_to_dns"`
 	IsRecursive     bool        `json:"is_recursive"`
-	DNSTTIndicators *DNSTTIndicators `json:"dnstt_indicators,omitempty"`
-	IodineIndicators *IodineIndicators `json:"iodine_indicators,omitempty"`
-	DNScat2Indicators *DNScat2Indicators `json:"dnscat2_indicators,omitempty"`
-	DNS2TCPIndicators *DNS2TCPIndicators `json:"dns2tcp_indicators,omitempty"`
-	AllIndicators   []string    `json:"all_indicators,omitempty"`
-	Error           string      `json:"error,omitempty"`
+	DNSTTIndicators *DNSTTIndicators `json:"dnstt_indicators,omitzero"`
+	IodineIndicators *IodineIndicators `json:"iodine_indicators,omitzero"`
+	DNScat2Indicators *DNScat2Indicators `json:"dnscat2_indicators,omitzero"`
+	DNS2TCPIndicators *DNS2TCPIndicators `json:"dns2tcp_indicators,omitzero"`
+	AllIndicators   []string    `json:"all_indicators,omitzero"`
+	Error           string      `json:"error,omitzero"`
 }
 
 // DNSTTIndicators contains DNSTT-specific detection indicators

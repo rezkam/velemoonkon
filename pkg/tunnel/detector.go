@@ -2,6 +2,8 @@ package tunnel
 
 import (
 	"context"
+	"maps"
+	"slices"
 )
 
 // Detector defines the interface for tunnel detectors
@@ -48,11 +50,7 @@ func (r *Registry) Get(name string) (Detector, bool) {
 
 // All returns all registered detectors
 func (r *Registry) All() []Detector {
-	detectors := make([]Detector, 0, len(r.detectors))
-	for _, detector := range r.detectors {
-		detectors = append(detectors, detector)
-	}
-	return detectors
+	return slices.Collect(maps.Values(r.detectors))
 }
 
 // GetByNames returns detectors by their names
