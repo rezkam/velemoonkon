@@ -1,6 +1,17 @@
 package dns
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// Milliseconds represents a duration in milliseconds for JSON encoding
+type Milliseconds int64
+
+// MarshalJSON implements json.Marshaler for proper millisecond encoding
+func (m Milliseconds) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("%d", m)), nil
+}
 
 // TestResult contains results from all DNS tests for a single IP
 type TestResult struct {
@@ -12,16 +23,18 @@ type TestResult struct {
 	SupportsTCP          bool          `json:"supports_tcp"`
 	SupportsEDNS         bool          `json:"supports_edns"`
 	SupportsDoT          bool          `json:"supports_dot"`
-	DoTResponseTime      time.Duration `json:"dot_response_time_ms"`
-	DoTError             string        `json:"dot_error,omitempty"`
+	DoTResponseTime      time.Duration `json:"-"` // Internal use only
+	DoTResponseTimeMs    Milliseconds  `json:"dot_response_time_ms"`
+	DoTError             string        `json:"dot_error,omitzero"`
 	SupportsDoH          bool          `json:"supports_doh"`
-	DoHEndpoint          string        `json:"doh_endpoint,omitempty"`
-	DoHResponseTime      time.Duration `json:"doh_response_time_ms"`
-	DoHError             string        `json:"doh_error,omitempty"`
+	DoHEndpoint          string        `json:"doh_endpoint,omitzero"`
+	DoHResponseTime      time.Duration `json:"-"` // Internal use only
+	DoHResponseTimeMs    Milliseconds  `json:"doh_response_time_ms"`
+	DoHError             string        `json:"doh_error,omitzero"`
 	TestDomainsResolved  []string      `json:"test_domains_resolved"`
 	TestDomainsFailed    []string      `json:"test_domains_failed"`
 	DNSServerType        string        `json:"dns_server_type"` // recursive/authoritative/limited/tunnel-suspect
-	Error                string        `json:"error,omitempty"`
+	Error                string        `json:"error,omitzero"`
 }
 
 // QueryOptions contains options for DNS queries
