@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/velemoonkon/lightning/pkg/config"
 )
 
 // QueryUDP performs a UDP DNS query
@@ -47,6 +48,12 @@ func QueryUDP(ctx context.Context, server string, domain string, qtype uint16, o
 		return nil, 0, fmt.Errorf("empty response")
 	}
 
+	// Optional: Validate response ID matches request ID (disabled by default for speed)
+	// Enable with LIGHTNING_DNS_VALIDATE_RESPONSE_ID=true for security-focused scanning
+	if config.DNS.ValidateResponseID && resp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, resp.Id)
+	}
+
 	_ = start // For potential fallback timing
 	return resp, rtt, nil
 }
@@ -62,17 +69,7 @@ func TestUDPDNS(ctx context.Context, server string) (*TestResult, error) {
 	opts := DefaultQueryOptions()
 	testDomains := []string{"google.com", "cloudflare.com", "example.com"}
 
-	// Test UDP port 53
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(server, "53"), 3*time.Second)
-	if err != nil {
-		result.UDPPortOpen = false
-		result.RespondsToQueries = false
-		return result, nil
-	}
-	conn.Close()
-	result.UDPPortOpen = true
-
-	// Test basic query
+	// Test basic queries (connection is tested implicitly via QueryUDP timeout)
 	for _, domain := range testDomains {
 		resp, _, err := QueryUDP(ctx, server, domain, dns.TypeA, opts)
 		if err != nil {
@@ -80,9 +77,12 @@ func TestUDPDNS(ctx context.Context, server string) (*TestResult, error) {
 			continue
 		}
 
-		if resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+		if resp.Rcode == dns.RcodeSuccess {
+			result.UDPPortOpen = true // Port is open if we got a valid DNS response
 			result.RespondsToQueries = true
-			result.TestDomainsResolved = append(result.TestDomainsResolved, domain)
+			if len(resp.Answer) > 0 {
+				result.TestDomainsResolved = append(result.TestDomainsResolved, domain)
+			}
 
 			// Check recursion available
 			if resp.RecursionAvailable {
@@ -96,11 +96,13 @@ func TestUDPDNS(ctx context.Context, server string) (*TestResult, error) {
 		}
 	}
 
-	// Determine server type
-	if result.SupportsRecursion && len(result.TestDomainsResolved) > 0 {
-		result.DNSServerType = "recursive"
-	} else if result.RespondsToQueries {
-		result.DNSServerType = "authoritative"
+	// Determine server type based on recursion support
+	if result.RespondsToQueries {
+		if result.SupportsRecursion {
+			result.DNSServerType = "recursive"
+		} else {
+			result.DNSServerType = "authoritative"
+		}
 	} else {
 		result.DNSServerType = "limited"
 	}
@@ -123,6 +125,11 @@ func QueryUDPRaw(ctx context.Context, server string, msg *dns.Msg, timeout time.
 	resp, rtt, err := client.ExchangeContext(ctx, msg, server)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// Optional: Validate response ID (same as QueryUDP)
+	if config.DNS.ValidateResponseID && resp != nil && resp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, resp.Id)
 	}
 
 	return resp, rtt, nil

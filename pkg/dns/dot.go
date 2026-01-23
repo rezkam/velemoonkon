@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/velemoonkon/lightning/pkg/config"
 )
 
 // QueryDoT performs a DNS over TLS query
@@ -55,6 +56,11 @@ func QueryDoT(ctx context.Context, server string, domain string, qtype uint16, o
 
 	if resp == nil {
 		return nil, 0, fmt.Errorf("empty response")
+	}
+
+	// Optional: Validate response ID (disabled by default for speed)
+	if config.DNS.ValidateResponseID && resp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, resp.Id)
 	}
 
 	return resp, rtt, nil

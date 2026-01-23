@@ -38,10 +38,12 @@ func (s *UDPScanner) Scan(ctx context.Context, ip string) (*ScanResult, error) {
 			continue
 		}
 
-		if resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+		if resp.Rcode == dns.RcodeSuccess {
 			result.Success = true
 			result.ResponseTime = rtt
-			result.DomainsResolved = append(result.DomainsResolved, domain)
+			if len(resp.Answer) > 0 {
+				result.DomainsResolved = append(result.DomainsResolved, domain)
+			}
 			result.Recursive = resp.RecursionAvailable
 
 			if resp.IsEdns0() != nil {

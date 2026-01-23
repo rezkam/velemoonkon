@@ -44,7 +44,9 @@ func (s *DoTScanner) Scan(ctx context.Context, ip string) (*ScanResult, error) {
 	if resp.Rcode == dns.RcodeSuccess {
 		result.Success = true
 		result.ResponseTime = rtt
-		result.DomainsResolved = append(result.DomainsResolved, testDomain)
+		if len(resp.Answer) > 0 {
+			result.DomainsResolved = append(result.DomainsResolved, testDomain)
+		}
 		result.Recursive = resp.RecursionAvailable
 	} else {
 		result.Error = "query failed"

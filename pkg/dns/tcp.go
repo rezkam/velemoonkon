@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/velemoonkon/lightning/pkg/config"
 )
 
 // QueryTCP performs a TCP DNS query
@@ -46,6 +47,11 @@ func QueryTCP(ctx context.Context, server string, domain string, qtype uint16, o
 		return nil, 0, fmt.Errorf("empty response")
 	}
 
+	// Optional: Validate response ID (disabled by default for speed)
+	if config.DNS.ValidateResponseID && resp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, resp.Id)
+	}
+
 	return resp, rtt, nil
 }
 
@@ -83,6 +89,11 @@ func QueryTCPRaw(ctx context.Context, server string, msg *dns.Msg, timeout time.
 	resp, rtt, err := client.ExchangeContext(ctx, msg, server)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// Optional: Validate response ID
+	if config.DNS.ValidateResponseID && resp != nil && resp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, resp.Id)
 	}
 
 	return resp, rtt, nil
