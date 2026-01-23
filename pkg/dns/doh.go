@@ -3,13 +3,60 @@ package dns
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/velemoonkon/lightning/pkg/config"
 )
+
+var (
+	// Shared HTTP client for DoH requests to enable connection reuse
+	sharedDoHClient     *http.Client
+	sharedDoHClientOnce sync.Once
+)
+
+// getSharedDoHClient returns a shared HTTP client optimized for DoH requests
+// Configuration is loaded from environment variables with LIGHTNING_ prefix
+func getSharedDoHClient() *http.Client {
+	sharedDoHClientOnce.Do(func() {
+		cfg := config.HTTP
+
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false,
+				MinVersion:         tls.VersionTLS12,
+				// Post-quantum key exchange enabled by default in Go 1.25
+				// Explicit configuration documents intent for quantum resistance
+				CurvePreferences: []tls.CurveID{
+					tls.X25519MLKEM768, // Post-quantum hybrid
+					tls.X25519,         // Classical fallback
+				},
+			},
+			MaxIdleConns:        cfg.MaxIdleConns,
+			MaxIdleConnsPerHost: cfg.MaxIdleConnsPerHost,
+			IdleConnTimeout:     cfg.IdleConnTimeout,
+			DisableKeepAlives:   false,
+			ForceAttemptHTTP2:   true,
+			DialContext: (&net.Dialer{
+				Timeout:   cfg.DialTimeout,
+				KeepAlive: cfg.KeepAlive,
+			}).DialContext,
+		}
+
+		sharedDoHClient = &http.Client{
+			Transport: transport,
+			Timeout:   cfg.RequestTimeout,
+		}
+	})
+	return sharedDoHClient
+}
 
 // DoHEndpoint represents a DNS over HTTPS endpoint
 type DoHEndpoint struct {
@@ -17,12 +64,10 @@ type DoHEndpoint struct {
 	Method string // GET or POST
 }
 
-// Common DoH endpoints to test
+// Common DoH endpoints to test (POST only, GET not implemented)
 var CommonDoHEndpoints = []DoHEndpoint{
-	{Path: "/dns-query", Method: "POST"},    // RFC 8484 standard
-	{Path: "/resolve", Method: "GET"},       // Google DNS format
-	{Path: "/dns", Method: "POST"},          // Alternative endpoint
-	{Path: "/dns-query", Method: "GET"},     // RFC 8484 GET variant
+	{Path: "/dns-query", Method: "POST"}, // RFC 8484 standard
+	{Path: "/dns", Method: "POST"},       // Alternative endpoint
 }
 
 // QueryDoH performs a DNS over HTTPS query
@@ -50,10 +95,8 @@ func QueryDoH(ctx context.Context, server string, domain string, qtype uint16, e
 	// Build URL
 	url := fmt.Sprintf("https://%s%s", server, endpoint.Path)
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: opts.Timeout,
-	}
+	// Use shared HTTP client for connection reuse
+	client := getSharedDoHClient()
 
 	var req *http.Request
 	start := time.Now()
@@ -90,22 +133,41 @@ func QueryDoH(ctx context.Context, server string, domain string, qtype uint16, e
 		return nil, 0, fmt.Errorf("DoH returned status %d", resp.StatusCode)
 	}
 
-	// Check content type
+	// Check content type (case-insensitive, handles charset parameters)
 	contentType := resp.Header.Get("Content-Type")
-	if contentType != "application/dns-message" {
+	if !strings.HasPrefix(strings.ToLower(contentType), "application/dns-message") {
 		return nil, 0, fmt.Errorf("unexpected content type: %s", contentType)
 	}
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body with size limit to prevent DoS attacks
+	// DNS messages are typically <4KB, default 64KB limit is generous but safe
+	// Configurable via LIGHTNING_MAX_DOH_RESPONSE_SIZE environment variable
+	maxSize := config.HTTP.MaxDoHResponseSize
+	limitedReader := io.LimitReader(resp.Body, maxSize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to read response body: %w", err)
+		return nil, 0, fmt.Errorf("failed to read DoH response: %w", err)
+	}
+
+	// Check if response was truncated (reached size limit)
+	if int64(len(body)) == maxSize {
+		// Try to read one more byte to confirm truncation
+		var buf [1]byte
+		n, _ := resp.Body.Read(buf[:])
+		if n > 0 {
+			return nil, 0, fmt.Errorf("DoH response exceeds maximum size of %d bytes (LIGHTNING_MAX_DOH_RESPONSE_SIZE)", maxSize)
+		}
 	}
 
 	// Unpack DNS message
 	dnsResp := new(dns.Msg)
 	if err := dnsResp.Unpack(body); err != nil {
 		return nil, 0, fmt.Errorf("failed to unpack DNS response: %w", err)
+	}
+
+	// Optional: Validate response ID (disabled by default for speed)
+	if config.DNS.ValidateResponseID && dnsResp.Id != msg.Id {
+		return nil, 0, fmt.Errorf("DNS response ID mismatch: expected %d, got %d (possible spoofing)", msg.Id, dnsResp.Id)
 	}
 
 	return dnsResp, rtt, nil

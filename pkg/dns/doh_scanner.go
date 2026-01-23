@@ -46,7 +46,9 @@ func (s *DoHScanner) Scan(ctx context.Context, ip string) (*ScanResult, error) {
 			result.Success = true
 			result.ResponseTime = rtt
 			result.Endpoint = endpoint.Path
-			result.DomainsResolved = append(result.DomainsResolved, testDomain)
+			if len(resp.Answer) > 0 {
+				result.DomainsResolved = append(result.DomainsResolved, testDomain)
+			}
 			result.Recursive = resp.RecursionAvailable
 			break
 		}
