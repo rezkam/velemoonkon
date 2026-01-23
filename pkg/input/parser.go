@@ -3,8 +3,10 @@ package input
 import (
 	"bufio"
 	"fmt"
+	"iter"
 	"net"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -87,22 +89,40 @@ func ParseFile(filename string) ([]net.IP, error) {
 	return ips, nil
 }
 
-// ExpandCIDR expands a CIDR range into individual IPs
-func ExpandCIDR(cidr string) ([]net.IP, error) {
+// IPRange returns an iterator over IPs in a CIDR range
+// This enables lazy evaluation and streaming without allocating the full slice
+// Example: for ip := range IPRange("192.168.1.0/24") { process(ip) }
+func IPRange(cidr string) (iter.Seq[net.IP], error) {
 	ip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return nil, err
 	}
 
-	var ips []net.IP
-	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); incrementIP(ip) {
-		// Make a copy of the IP
-		newIP := make(net.IP, len(ip))
-		copy(newIP, ip)
-		ips = append(ips, newIP)
-	}
+	return func(yield func(net.IP) bool) {
+		// Start from the first IP in the range
+		for currentIP := ip.Mask(ipnet.Mask); ipnet.Contains(currentIP); incrementIP(currentIP) {
+			// Make a copy of the IP since we're mutating the original
+			newIP := make(net.IP, len(currentIP))
+			copy(newIP, currentIP)
 
-	return ips, nil
+			// Yield the IP to the consumer
+			// If yield returns false, consumer wants to stop
+			if !yield(newIP) {
+				return
+			}
+		}
+	}, nil
+}
+
+// ExpandCIDR expands a CIDR range into individual IPs
+// For streaming use cases, prefer IPRange() to avoid allocating the full slice
+func ExpandCIDR(cidr string) ([]net.IP, error) {
+	seq, err := IPRange(cidr)
+	if err != nil {
+		return nil, err
+	}
+	// slices.Collect efficiently converts iterator to slice with proper preallocation
+	return slices.Collect(seq), nil
 }
 
 // incrementIP increments an IP address by one
