@@ -94,7 +94,7 @@ func DetectDNSTT(ctx context.Context, server string, domain string) (*DNSTTIndic
 // IsDNSTT determines if indicators suggest DNSTT tunnel
 func IsDNSTT(indicators *DNSTTIndicators) (bool, string) {
 	if indicators == nil {
-		return false, "low"
+		return false, ""
 	}
 
 	score := 0
@@ -120,7 +120,7 @@ func IsDNSTT(indicators *DNSTTIndicators) (bool, string) {
 		score++
 	}
 
-	// Confidence levels
+	// Confidence levels (only set when tunnel detected)
 	if score >= 5 {
 		return true, "high"
 	} else if score >= 3 {
@@ -129,5 +129,5 @@ func IsDNSTT(indicators *DNSTTIndicators) (bool, string) {
 		return true, "low"
 	}
 
-	return false, "low"
+	return false, ""
 }

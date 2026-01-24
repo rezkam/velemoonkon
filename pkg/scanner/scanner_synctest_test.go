@@ -596,6 +596,289 @@ func TestScannerDuplicateIPs(t *testing.T) {
 }
 
 // =============================================================================
+// Probe-Based Architecture Tests
+// =============================================================================
+
+// TestScannerWithNoProbes verifies scanner runs with no probes enabled
+func TestScannerWithNoProbes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		config := Config{
+			Workers:   2,
+			Timeout:   1,
+			RateLimit: 0,
+			Quiet:     true,
+			// No probes enabled (all Enable* flags are false)
+		}
+		s := NewScanner(config)
+
+		// Should have no probes registered
+		if s.probes.Count() != 0 {
+			t.Errorf("Expected 0 probes, got %d", s.probes.Count())
+		}
+
+		ips := generateTestIPs(5)
+		results, err := s.Scan(ctx, ips)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		// Should still return results (just with no probe data)
+		if len(results) != 5 {
+			t.Errorf("Expected 5 results, got %d", len(results))
+		}
+
+		t.Logf("No probes test passed: %d results with 0 probes", len(results))
+	})
+}
+
+// TestScannerWithDNSProbe verifies DNS probe registration and execution
+func TestScannerWithDNSProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		config := Config{
+			Workers:   2,
+			Timeout:   1,
+			RateLimit: 0,
+			Quiet:     true,
+			EnableUDP: true,
+			EnableTCP: true,
+		}
+		s := NewScanner(config)
+
+		// Should have DNS probe registered
+		if s.probes.Count() == 0 {
+			t.Error("Expected DNS probe to be registered")
+		}
+
+		foundDNS := false
+		for _, probe := range s.probes.All() {
+			if probe.Name() == "dns" {
+				foundDNS = true
+				break
+			}
+		}
+		if !foundDNS {
+			t.Error("Expected DNS probe in registry")
+		}
+
+		t.Logf("DNS probe test passed: probe registered")
+	})
+}
+
+// TestScannerWithPortsProbe verifies port scan probe
+func TestScannerWithPortsProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		config := Config{
+			Workers:        2,
+			Timeout:        1,
+			RateLimit:      0,
+			Quiet:          true,
+			EnablePortScan: true,
+		}
+		s := NewScanner(config)
+
+		// Should have ports probe registered
+		foundPorts := false
+		for _, probe := range s.probes.All() {
+			if probe.Name() == "ports" {
+				foundPorts = true
+				break
+			}
+		}
+		if !foundPorts {
+			t.Error("Expected ports probe in registry")
+		}
+
+		ips := generateTestIPs(3)
+		results, err := s.Scan(ctx, ips)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		if len(results) != 3 {
+			t.Errorf("Expected 3 results, got %d", len(results))
+		}
+
+		t.Logf("Ports probe test passed: %d results", len(results))
+	})
+}
+
+// TestScannerWithTunnelProbe verifies tunnel probe
+func TestScannerWithTunnelProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		config := Config{
+			Workers:       2,
+			Timeout:       1,
+			RateLimit:     0,
+			Quiet:         true,
+			EnableTunnel:  true,
+			TunnelDNSTT:   true,
+			TunnelIodine:  true,
+			TunnelDomain:  "test.example.com",
+		}
+		s := NewScanner(config)
+
+		// Should have tunnel probe registered
+		foundTunnel := false
+		for _, probe := range s.probes.All() {
+			if probe.Name() == "tunnel" {
+				foundTunnel = true
+				break
+			}
+		}
+		if !foundTunnel {
+			t.Error("Expected tunnel probe in registry")
+		}
+
+		t.Logf("Tunnel probe test passed: probe registered")
+	})
+}
+
+// TestScannerMultipleProbes verifies multiple probes run in sequence
+func TestScannerMultipleProbes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		config := Config{
+			Workers:        2,
+			Timeout:        2,
+			RateLimit:      0,
+			Quiet:          true,
+			EnableUDP:      true,  // DNS
+			EnableTCP:      true,  // DNS
+			EnablePortScan: true,  // Ports
+		}
+		s := NewScanner(config)
+
+		// Should have multiple probes registered
+		if s.probes.Count() < 2 {
+			t.Errorf("Expected at least 2 probes, got %d", s.probes.Count())
+		}
+
+		ips := generateTestIPs(3)
+		results, err := s.Scan(ctx, ips)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		if len(results) != 3 {
+			t.Errorf("Expected 3 results, got %d", len(results))
+		}
+
+		t.Logf("Multiple probes test passed: %d probes, %d results", s.probes.Count(), len(results))
+	})
+}
+
+// TestScannerLifecycle verifies Start/Stop lifecycle
+func TestScannerLifecycle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		config := Config{
+			Workers:   2,
+			Timeout:   1,
+			RateLimit: 0,
+			Quiet:     true,
+		}
+		s := NewScanner(config)
+
+		// Start should succeed even with no ICMP probe
+		if err := s.Start(); err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+
+		// Stop should be safe to call
+		s.Stop()
+
+		// Double stop should be safe
+		s.Stop()
+
+		t.Logf("Lifecycle test passed")
+	})
+}
+
+// TestScannerProbeErrors verifies error handling in probes
+func TestScannerProbeErrors(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		config := Config{
+			Workers:   2,
+			Timeout:   1, // Short timeout
+			RateLimit: 0,
+			Quiet:     true,
+			EnableUDP: true,
+		}
+		s := NewScanner(config)
+
+		// Scan documentation IPs (will timeout/fail)
+		ips := []net.IP{net.ParseIP("192.0.2.1")}
+		results, err := s.Scan(ctx, ips)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+
+		if len(results) != 1 {
+			t.Fatalf("Expected 1 result, got %d", len(results))
+		}
+
+		// Result should have scan errors recorded
+		t.Logf("Probe errors test passed: %d errors recorded", len(results[0].ScanErrors))
+	})
+}
+
+// TestScannerStreamWithProbes verifies streaming with multiple probes
+func TestScannerStreamWithProbes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		config := Config{
+			Workers:        3,
+			Timeout:        1,
+			RateLimit:      0,
+			Quiet:          true,
+			EnablePortScan: true,
+		}
+		s := NewScanner(config)
+
+		ipGenerator := func(yield func(net.IP) bool) {
+			for i := range 10 {
+				if !yield(net.ParseIP(fmt.Sprintf("10.0.2.%d", i+1))) {
+					return
+				}
+			}
+		}
+
+		var resultCount atomic.Int32
+		handler := func(result *ScanResult) error {
+			resultCount.Add(1)
+			return nil
+		}
+
+		count, err := s.ScanStream(ctx, ipGenerator, handler)
+
+		if err != nil {
+			t.Fatalf("ScanStream failed: %v", err)
+		}
+
+		if count != 10 {
+			t.Errorf("Expected count 10, got %d", count)
+		}
+
+		if resultCount.Load() != 10 {
+			t.Errorf("Handler called %d times, expected 10", resultCount.Load())
+		}
+
+		t.Logf("Streaming with probes test passed: %d results", count)
+	})
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 

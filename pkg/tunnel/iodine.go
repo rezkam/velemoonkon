@@ -102,7 +102,7 @@ func DetectIodine(ctx context.Context, server string, domain string) (*IodineInd
 // IsIodine determines if indicators suggest Iodine tunnel
 func IsIodine(indicators *IodineIndicators) (bool, string) {
 	if indicators == nil {
-		return false, "low"
+		return false, ""
 	}
 
 	score := 0
@@ -137,5 +137,5 @@ func IsIodine(indicators *IodineIndicators) (bool, string) {
 		return true, "low"
 	}
 
-	return false, "low"
+	return false, ""
 }

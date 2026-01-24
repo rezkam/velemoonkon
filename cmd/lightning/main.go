@@ -12,356 +12,379 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/velemoonkon/lightning/pkg/config"
 	"github.com/velemoonkon/lightning/pkg/input"
 	"github.com/velemoonkon/lightning/pkg/output"
 	"github.com/velemoonkon/lightning/pkg/scanner"
-	"github.com/spf13/cobra"
 )
 
 var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
+)
 
-	// File input
+// CLI flags
+var (
+	// Input
 	inputFile string
 
-	// Output options
-	outputFormat string
-	outputPrefix string
-	quiet        bool
-	verbose      bool
+	// Probes
+	enableDNS    bool
+	enableICMP   bool
+	enableTunnel bool
+	enablePorts  bool
+	noDNS        bool
+	noPorts      bool
 
-	// Scanner and detector types
-	scannerTypes  string
-	detectorTypes string
-	tunnelDomain  string
+	// DNS options
+	dnsProto string
+
+	// ICMP options
+	icmpCount      int
+	icmpPrivileged bool
+	icmpUDP        bool
+
+	// Tunnel options
+	tunnelType   string
+	tunnelDomain string
+
+	// Output
+	outputFile   string
+	outputFormat string
 
 	// Performance
-	workers   int
-	timeout   int
-	rateLimit int
+	workers int
+	timeout int
+	rate    int
+
+	// Logging
+	quiet   bool
+	verbose bool
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "lightning [flags] <target>",
-	Short:   "Fast DNS scanner with tunnel detection",
-	Version: version,
-	Long: `Lightning - Production-ready DNS testing and tunnel detection tool
+	Use:   "lightning [flags] <target>...",
+	Short: "High-performance network scanner",
+	Long: `Lightning - Fast network scanning for DNS, ICMP, and tunnel detection
 
-Scans IPs for DNS functionality (UDP, TCP, DoT, DoH) and detects DNS tunnels
-(DNSTT, Iodine, DNScat2, DNS2TCP) with high-performance concurrent scanning.
+Scans IP addresses and CIDR ranges for:
+  • DNS servers (UDP, TCP, DoT, DoH)
+  • ICMP reachability (ping)
+  • DNS tunnel endpoints (DNSTT, Iodine, DNScat2, DNS2TCP)
+  • Open ports (53, 443, 853)
 
-By default, outputs JSON reports with DNS scanning enabled and tunnel detection disabled.`,
-	Example: `  # Scan single IP with DNS tests
+Output formats:
+  • JSONL (default) - streaming, pipe to jq
+  • Parquet - columnar, query with DuckDB`,
+
+	Example: `  # Basic DNS scan
   lightning 8.8.8.8
 
-  # Scan CIDR range with high performance
-  lightning 5.62.160.0/19 -w 500 --rate-limit 2000
+  # Scan CIDR range, save to file
+  lightning 10.0.0.0/24 -o results.jsonl
 
-  # Scan file with IPs/CIDRs
-  lightning -f targets.txt
+  # ICMP ping only (requires root)
+  sudo lightning 8.8.8.8 --icmp --no-dns --no-ports
 
-  # Output both JSON and Markdown
-  lightning 8.8.8.8 --output-format json,md
-
-  # Scan with all DNS tests (default)
-  lightning 8.8.8.8 --scanner all
-
-  # Only test UDP and TCP DNS
-  lightning 8.8.8.8 --scanner udp,tcp
+  # DNS + ICMP combined
+  sudo lightning 8.8.8.0/24 --icmp -o scan.jsonl
 
   # Only test DoH and DoT
-  lightning 1.1.1.1 --scanner dot,doh
+  lightning 1.1.1.1 --dns-proto dot,doh
 
-  # Enable tunnel detection for all types
-  lightning 1.1.1.1 --detector all
+  # Tunnel detection
+  lightning 1.1.1.1 --tunnel --tunnel-domain t.example.com
 
-  # Only detect DNSTT and Iodine tunnels
-  lightning 1.1.1.1 --detector dnstt,iodine
+  # High-performance scan
+  lightning 5.62.160.0/19 -w 500 -r 2000 -o results.jsonl
 
-  # Scan with specific tunnel domain
-  lightning 1.1.1.1 --detector all --tunnel-domain tunnel.example.com`,
+  # Parquet output for analytics
+  lightning 10.0.0.0/16 --format parquet -o scan.parquet
+  # Then query: duckdb -c "SELECT ip FROM 'scan.parquet' WHERE dns_supports_doh"
+
+  # Pipe JSONL to jq
+  lightning 1.1.1.1 | jq '.dns_result'
+
+  # Read targets from file
+  lightning -f targets.txt -o results.jsonl`,
+
 	Args: func(cmd *cobra.Command, args []string) error {
 		if inputFile == "" && len(args) == 0 {
-			return fmt.Errorf("requires either a target argument or --file flag")
+			return fmt.Errorf("requires target(s) or -f/--file")
 		}
 		return nil
 	},
-	RunE: runScan,
+	RunE:          runScan,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
 	rootCmd.SetVersionTemplate(fmt.Sprintf("lightning %s (commit: %s, built: %s)\n", version, commit, date))
 
-	rootCmd.SetHelpCommand(&cobra.Command{
-		Use:    "help [command]",
-		Short:  "Help about any command",
-		Hidden: false,
-	})
-}
+	f := rootCmd.Flags()
 
-func init() {
-	// File input
-	rootCmd.Flags().StringVarP(&inputFile, "file", "f", "", "file containing IPs/CIDRs (one per line)")
+	// Input
+	f.StringVarP(&inputFile, "file", "f", "", "Read targets from file (one per line)")
 
-	// Output options
-	rootCmd.Flags().StringVar(&outputFormat, "output-format", "json", "output format: json, md, or json,md")
-	rootCmd.Flags().StringVarP(&outputPrefix, "output", "o", "", "output file prefix (auto-generated if not specified)")
-	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress progress output")
-	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose logging")
+	// Probes
+	f.BoolVar(&enableDNS, "dns", false, "Enable DNS scanning")
+	f.BoolVar(&enableICMP, "icmp", false, "Enable ICMP ping (requires root)")
+	f.BoolVar(&enableTunnel, "tunnel", false, "Enable tunnel detection")
+	f.BoolVar(&enablePorts, "ports", false, "Enable port scanning")
+	f.BoolVar(&noDNS, "no-dns", false, "Disable DNS scanning")
+	f.BoolVar(&noPorts, "no-ports", false, "Disable port scanning")
 
-	// Scanner and detector types
-	rootCmd.Flags().StringVar(&scannerTypes, "scanner", "all", "scanner types: all, udp, tcp, dot, doh (comma-separated)")
-	rootCmd.Flags().StringVar(&detectorTypes, "detector", "", "detector types: all, dnstt, iodine, dnscat2, dns2tcp (comma-separated, default: disabled)")
-	rootCmd.Flags().StringVar(&tunnelDomain, "tunnel-domain", "", "specific domain for tunnel detection")
+	// DNS options
+	f.StringVar(&dnsProto, "dns-proto", "all", "DNS protocols: all, udp, tcp, dot, doh")
 
-	// Performance tuning
-	rootCmd.Flags().IntVarP(&workers, "workers", "w", 100, "concurrent IP workers (0=auto: max(4, 4*CPUs) for I/O-bound work)")
-	rootCmd.Flags().IntVarP(&timeout, "timeout", "t", 5, "timeout per IP in seconds")
-	rootCmd.Flags().IntVar(&rateLimit, "rate-limit", 1000, "max IPs per second (0=unlimited)")
-}
+	// ICMP options
+	f.IntVar(&icmpCount, "icmp-count", 1, "ICMP pings per IP")
+	f.BoolVar(&icmpPrivileged, "icmp-privileged", true, "Use raw sockets (requires root)")
+	f.BoolVar(&icmpUDP, "icmp-udp", false, "Use UDP sockets (no root needed)")
 
-// initLogger configures structured logging based on verbosity flags
-func initLogger() {
-	var level slog.Level
-	if verbose {
-		level = slog.LevelDebug
-	} else if quiet {
-		level = slog.LevelError
-	} else {
-		level = slog.LevelInfo
-	}
+	// Tunnel options
+	f.StringVar(&tunnelType, "tunnel-type", "all", "Tunnel types: all, dnstt, iodine, dnscat2, dns2tcp")
+	f.StringVar(&tunnelDomain, "tunnel-domain", "", "Domain for tunnel detection")
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
-	})
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	// Output
+	f.StringVarP(&outputFile, "output", "o", "-", "Output file (- for stdout)")
+	f.StringVar(&outputFormat, "format", "jsonl", "Output format: jsonl, parquet")
+
+	// Performance
+	f.IntVarP(&workers, "workers", "w", 100, "Concurrent workers")
+	f.IntVarP(&timeout, "timeout", "t", 5, "Timeout per IP (seconds)")
+	f.IntVarP(&rate, "rate", "r", 1000, "Max IPs/second (0 = unlimited)")
+
+	// Logging
+	f.BoolVarP(&quiet, "quiet", "q", false, "Suppress progress output")
+	f.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+
+	// Group flags in help
+	rootCmd.SetUsageTemplate(usageTemplate)
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
-	// Initialize structured logging
 	initLogger()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle interrupt signals
+	// Handle interrupt
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		slog.Info("interrupt received, stopping scan")
+		slog.Info("stopping scan...")
 		cancel()
 	}()
 
 	// Parse targets
-	var ips []net.IP
-	var err error
-
-	if inputFile != "" {
-		slog.Info("reading targets from file", "file", inputFile)
-		ips, err = input.ParseFile(inputFile)
-		if err != nil {
-			return fmt.Errorf("failed to parse file: %w", err)
-		}
-	} else {
-		ips, err = input.ParseTargets(args)
-		if err != nil {
-			return fmt.Errorf("failed to parse targets: %w", err)
-		}
+	ips, err := parseTargets(args)
+	if err != nil {
+		return err
 	}
 
 	if len(ips) == 0 {
 		return fmt.Errorf("no valid IP addresses found")
 	}
 
-	slog.Info("starting scan", "total_ips", len(ips))
+	slog.Info("starting scan", "targets", len(ips))
 
-	// Parse scanner and detector types
-	enableUDP, enableTCP, enableDoT, enableDoH := parseScannerTypes(scannerTypes)
-	enableTunnel, enableDNSTT, enableIodine, enableDNScat2, enableDNS2TCP := parseDetectorTypes(detectorTypes)
+	// Resolve probe settings
+	// Default: DNS and ports enabled, ICMP and tunnel disabled
+	doDNS := (enableDNS || !noDNS) && !noDNS
+	doPorts := (enablePorts || !noPorts) && !noPorts
+	doICMP := enableICMP
+	doTunnel := enableTunnel
 
-	// Parse test domains from ENV default
-	domains := parseTestDomains(config.Scanner.DefaultTestDomains)
-
-	// Create scanner config (uses ENV defaults for advanced settings)
-	scannerConfig := scanner.Config{
-		Workers:         workers,
-		DNSConcurrency:  config.Scanner.DefaultDNSConcurrency, // From ENV: LIGHTNING_DEFAULT_DNS_CONCURRENCY
-		Timeout:         timeout,
-		RateLimit:       rateLimit,
-		EnableUDP:       enableUDP,
-		EnableTCP:       enableTCP,
-		EnableDoT:       enableDoT,
-		EnableDoH:       enableDoH,
-		EnableTunnel:    enableTunnel,
-		TunnelDNSTT:     enableDNSTT,
-		TunnelIodine:    enableIodine,
-		TunnelDNScat2:   enableDNScat2,
-		TunnelDNS2TCP:   enableDNS2TCP,
-		EnablePortScan:  config.Scanner.DefaultScanPorts, // From ENV: LIGHTNING_DEFAULT_SCAN_PORTS
-		TunnelDomain:    tunnelDomain,
-		TestDomains:     domains, // From ENV: LIGHTNING_DEFAULT_TEST_DOMAINS
-		Verbose:         verbose,
-		Quiet:           quiet,
+	// If user explicitly enabled something, don't use defaults
+	if enableDNS || enableICMP || enableTunnel || enablePorts {
+		doDNS = enableDNS
+		doPorts = enablePorts
 	}
 
-	// Create scanner
-	s := scanner.NewScanner(scannerConfig)
+	// Parse DNS protocols
+	udp, tcp, dot, doh := parseDNSProto(dnsProto)
 
-	// Determine if we should use streaming output for large scans
-	// Threshold: 10,000 IPs (avoids keeping ~10MB+ in memory)
-	const streamingThreshold = 10000
-	useStreaming := len(ips) >= streamingThreshold
+	// Parse tunnel types - only enabled if --tunnel flag is set
+	var tunnelEnabled, dnstt, iodine, dnscat2, dns2tcp bool
+	if doTunnel {
+		tunnelEnabled, dnstt, iodine, dnscat2, dns2tcp = parseTunnelTypes(tunnelType)
+	}
+
+	// ICMP socket type
+	privileged := icmpPrivileged && !icmpUDP
+
+	// Build scanner config
+	cfg := scanner.Config{
+		Workers:        workers,
+		DNSConcurrency: config.Scanner.DefaultDNSConcurrency,
+		Timeout:        timeout,
+		RateLimit:      rate,
+		// ICMP
+		EnableICMP:     doICMP,
+		ICMPCount:      icmpCount,
+		ICMPPrivileged: privileged,
+		// DNS
+		EnableUDP: doDNS && udp,
+		EnableTCP: doDNS && tcp,
+		EnableDoT: doDNS && dot,
+		EnableDoH: doDNS && doh,
+		// Tunnel
+		EnableTunnel:  tunnelEnabled,
+		TunnelDNSTT:   dnstt,
+		TunnelIodine:  iodine,
+		TunnelDNScat2: dnscat2,
+		TunnelDNS2TCP: dns2tcp,
+		TunnelDomain:  tunnelDomain,
+		// Ports
+		EnablePortScan: doPorts,
+		// Other
+		TestDomains: parseTestDomains(config.Scanner.DefaultTestDomains),
+		Verbose:     verbose,
+		Quiet:       quiet,
+	}
+
+	// Create and start scanner
+	s := scanner.NewScanner(cfg)
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("failed to start: %w", err)
+	}
+	defer s.Stop()
+
+	// Setup output writer
+	resultHandler, closeWriter, err := createOutputWriter()
+	if err != nil {
+		return err
+	}
 
 	startTime := time.Now()
 
-	if useStreaming {
-		slog.Info("using streaming output for large scan", "total_ips", len(ips))
-	}
-
-	// Generate output filename prefix
-	if outputPrefix == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		if inputFile != "" {
-			baseName := strings.TrimSuffix(inputFile, ".txt")
-			baseName = strings.TrimSuffix(baseName, ".list")
-			if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
-				baseName = baseName[idx+1:]
-			}
-			outputPrefix = fmt.Sprintf("lightning_%s_%dips_%s", baseName, len(ips), timestamp)
-		} else if len(ips) == 1 {
-			outputPrefix = fmt.Sprintf("lightning_%s_%s", ips[0].String(), timestamp)
-		} else if len(args) > 0 && strings.Contains(args[0], "/") {
-			cidr := strings.ReplaceAll(args[0], "/", "-")
-			cidr = strings.ReplaceAll(cidr, ".", "_")
-			outputPrefix = fmt.Sprintf("lightning_%s_%dips_%s", cidr, len(ips), timestamp)
-		} else {
-			outputPrefix = fmt.Sprintf("lightning_scan_%dips_%s", len(ips), timestamp)
-		}
-	}
-
-	// Parse output formats
-	writeJSON, writeMarkdown := parseOutputFormats(outputFormat)
-
-	// Run scan with appropriate strategy
-	if useStreaming {
-		// Streaming approach: write results as they arrive (low memory)
-		return runStreamingScan(ctx, s, ips, writeJSON, writeMarkdown, outputPrefix, startTime)
-	}
-
-	// Standard approach: collect all results then write (faster for small scans)
-	results, err := s.Scan(ctx, ips)
-	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
-	}
-
-	slog.Info("scan completed",
-		"duration", time.Since(startTime).String(),
-		"total_results", len(results))
-
-	// Write output files
-	if writeJSON {
-		jsonFile := outputPrefix + ".json"
-		if err := output.WriteJSON(results, jsonFile, startTime); err != nil {
-			return fmt.Errorf("failed to write JSON: %w", err)
-		}
-		slog.Info("JSON report written", "file", jsonFile)
-	}
-
-	if writeMarkdown {
-		mdFile := outputPrefix + ".md"
-		if err := output.WriteMarkdown(results, mdFile, startTime); err != nil {
-			return fmt.Errorf("failed to write Markdown: %w", err)
-		}
-		slog.Info("Markdown report written", "file", mdFile)
-	}
-
-	return nil
-}
-
-// runStreamingScan performs a scan with streaming output (low memory usage)
-func runStreamingScan(ctx context.Context, s *scanner.Scanner, ips []net.IP, writeJSON, writeMarkdown bool, outputPrefix string, startTime time.Time) error {
-	// Create streaming writers
-	var jsonWriter, mdWriter *output.StreamWriter
-	var err error
-
-	if writeJSON {
-		jsonFile := outputPrefix + ".json"
-		jsonWriter, err = output.NewStreamWriter(jsonFile, "json", startTime, 100)
-		if err != nil {
-			return fmt.Errorf("failed to create JSON writer: %w", err)
-		}
-		defer jsonWriter.Close()
-	}
-
-	if writeMarkdown {
-		mdFile := outputPrefix + ".md"
-		mdWriter, err = output.NewStreamWriter(mdFile, "markdown", startTime, 100)
-		if err != nil {
-			return fmt.Errorf("failed to create markdown writer: %w", err)
-		}
-		defer mdWriter.Close()
-	}
-
-	// Result handler that writes to stream
-	resultHandler := func(result *scanner.ScanResult) error {
-		if jsonWriter != nil {
-			if err := jsonWriter.WriteResult(result); err != nil {
-				return err
-			}
-		}
-		if mdWriter != nil {
-			if err := mdWriter.WriteResult(result); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	// Run streaming scan
+	// Run scan
 	ipSeq := slices.Values(ips)
-	resultCount, err := s.ScanStream(ctx, ipSeq, resultHandler)
-	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
+	resultCount, scanErr := s.ScanStream(ctx, ipSeq, resultHandler)
+
+	// Close writer
+	if closeErr := closeWriter(); closeErr != nil && scanErr == nil {
+		scanErr = closeErr
 	}
 
-	slog.Info("scan completed",
-		"duration", time.Since(startTime).String(),
-		"total_results", resultCount)
-
-	// Close writers (finalizes files)
-	if jsonWriter != nil {
-		if err := jsonWriter.Close(); err != nil {
-			return fmt.Errorf("failed to finalize JSON: %w", err)
-		}
-		slog.Info("JSON report written", "file", outputPrefix+".json")
+	if scanErr != nil && ctx.Err() == nil {
+		return fmt.Errorf("scan failed: %w", scanErr)
 	}
 
-	if mdWriter != nil {
-		if err := mdWriter.Close(); err != nil {
-			return fmt.Errorf("failed to finalize markdown: %w", err)
-		}
-		slog.Info("Markdown report written", "file", outputPrefix+".md")
-	}
+	slog.Info("scan completed", "results", resultCount, "duration", time.Since(startTime).Round(time.Millisecond))
 
 	return nil
 }
 
-// parseTestDomains parses the test domains string
+func parseTargets(args []string) ([]net.IP, error) {
+	if inputFile != "" {
+		slog.Debug("reading targets", "file", inputFile)
+		return input.ParseFile(inputFile)
+	}
+	return input.ParseTargets(args)
+}
+
+func createOutputWriter() (func(*scanner.ScanResult) error, func() error, error) {
+	format := strings.ToLower(outputFormat)
+
+	switch format {
+	case "parquet":
+		if outputFile == "-" {
+			return nil, nil, fmt.Errorf("parquet cannot write to stdout, use -o file.parquet")
+		}
+		pw, err := output.NewParquetWriter(outputFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create parquet writer: %w", err)
+		}
+		return pw.Write, pw.Close, nil
+
+	default: // jsonl
+		jw, err := output.NewWriter(outputFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create writer: %w", err)
+		}
+		return jw.Write, jw.Close, nil
+	}
+}
+
+func initLogger() {
+	var level slog.Level
+	switch {
+	case verbose:
+		level = slog.LevelDebug
+	case quiet:
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+}
+
+func parseDNSProto(proto string) (udp, tcp, dot, doh bool) {
+	proto = strings.ToLower(strings.TrimSpace(proto))
+
+	if proto == "" || proto == "all" {
+		return true, true, true, true
+	}
+	if proto == "none" {
+		return false, false, false, false
+	}
+
+	for _, p := range strings.Split(proto, ",") {
+		switch strings.TrimSpace(p) {
+		case "udp":
+			udp = true
+		case "tcp":
+			tcp = true
+		case "dot":
+			dot = true
+		case "doh":
+			doh = true
+		}
+	}
+	return
+}
+
+func parseTunnelTypes(types string) (enabled, dnstt, iodine, dnscat2, dns2tcp bool) {
+	types = strings.ToLower(strings.TrimSpace(types))
+
+	if types == "" || types == "none" {
+		return false, false, false, false, false
+	}
+	if types == "all" {
+		return true, true, true, true, true
+	}
+
+	for _, t := range strings.Split(types, ",") {
+		switch strings.TrimSpace(t) {
+		case "dnstt":
+			dnstt, enabled = true, true
+		case "iodine":
+			iodine, enabled = true, true
+		case "dnscat2":
+			dnscat2, enabled = true, true
+		case "dns2tcp":
+			dns2tcp, enabled = true, true
+		}
+	}
+	return
+}
+
 func parseTestDomains(domains string) []string {
 	if domains == "" {
 		return []string{"chatgpt.com", "google.com", "microsoft.com"}
 	}
 
-	parts := strings.Split(domains, ",")
-	result := make([]string, 0, len(parts))
-	for _, d := range parts {
-		d = strings.TrimSpace(d)
-		if d != "" {
+	var result []string
+	for _, d := range strings.Split(domains, ",") {
+		if d = strings.TrimSpace(d); d != "" {
 			result = append(result, d)
 		}
 	}
@@ -369,139 +392,61 @@ func parseTestDomains(domains string) []string {
 	if len(result) == 0 {
 		return []string{"chatgpt.com", "google.com", "microsoft.com"}
 	}
-
 	return result
 }
 
-// parseOutputFormats parses the output format string and returns which formats to write
-func parseOutputFormats(format string) (json, markdown bool) {
-	// Default to JSON only if empty
-	if format == "" {
-		return true, false
-	}
-
-	formats := strings.Split(format, ",")
-	for _, f := range formats {
-		f = strings.TrimSpace(strings.ToLower(f))
-		switch f {
-		case "json":
-			json = true
-		case "md", "markdown":
-			markdown = true
-		}
-	}
-
-	// If no valid format found, default to JSON
-	if !json && !markdown {
-		return true, false
-	}
-
-	return json, markdown
-}
-
-// parseScannerTypes parses the scanner types string
-func parseScannerTypes(types string) (udp, tcp, dot, doh bool) {
-	types = strings.TrimSpace(strings.ToLower(types))
-
-	// Handle "all" case
-	if types == "" || types == "all" {
-		return true, true, true, true
-	}
-
-	// Handle "none" case
-	if types == "none" {
-		return false, false, false, false
-	}
-
-	// Parse comma-separated types
-	scanners := strings.Split(types, ",")
-	validCount := 0
-	for _, s := range scanners {
-		s = strings.TrimSpace(s)
-		switch s {
-		case "udp":
-			udp = true
-			validCount++
-		case "tcp":
-			tcp = true
-			validCount++
-		case "dot":
-			dot = true
-			validCount++
-		case "doh":
-			doh = true
-			validCount++
-		default:
-			if s != "" {
-				slog.Warn("unknown scanner type ignored", "type", s, "valid_types", "udp,tcp,dot,doh")
-			}
-		}
-	}
-
-	// If no valid scanners specified, default to all
-	if validCount == 0 {
-		slog.Warn("no valid scanner types specified, using all scanners")
-		return true, true, true, true
-	}
-
-	return udp, tcp, dot, doh
-}
-
-// parseDetectorTypes parses the detector types string
-func parseDetectorTypes(types string) (enabled, dnstt, iodine, dnscat2, dns2tcp bool) {
-	types = strings.TrimSpace(strings.ToLower(types))
-
-	// Handle empty or "none" case - tunnel detection disabled by default
-	if types == "" || types == "none" {
-		return false, false, false, false, false
-	}
-
-	// Handle "all" case
-	if types == "all" {
-		return true, true, true, true, true
-	}
-
-	// Parse comma-separated types
-	detectors := strings.Split(types, ",")
-	validCount := 0
-	for _, d := range detectors {
-		d = strings.TrimSpace(d)
-		switch d {
-		case "dnstt":
-			dnstt = true
-			validCount++
-		case "iodine":
-			iodine = true
-			validCount++
-		case "dnscat2":
-			dnscat2 = true
-			validCount++
-		case "dns2tcp":
-			dns2tcp = true
-			validCount++
-		default:
-			if d != "" {
-				slog.Warn("unknown detector type ignored", "type", d, "valid_types", "dnstt,iodine,dnscat2,dns2tcp")
-			}
-		}
-	}
-
-	// If no valid detectors specified, disable tunnel detection
-	if validCount == 0 {
-		slog.Warn("no valid detector types specified, disabling tunnel detection")
-		return false, false, false, false, false
-	}
-
-	// Enable tunnel detection if any valid detector was specified
-	enabled = true
-	return enabled, dnstt, iodine, dnscat2, dns2tcp
-}
-
 func main() {
-	// Initialize configuration from environment variables
 	config.Init()
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
+
+const usageTemplate = `Usage:
+  {{.UseLine}}
+
+Examples:
+{{.Example}}
+
+Input:
+  -f, --file string        Read targets from file
+
+Probes:
+      --dns                Enable DNS scanning (default when no probe specified)
+      --icmp               Enable ICMP ping (requires root)
+      --tunnel             Enable tunnel detection
+      --ports              Enable port scanning (default when no probe specified)
+      --no-dns             Disable DNS scanning
+      --no-ports           Disable port scanning
+
+DNS Options:
+      --dns-proto string   Protocols: all, udp, tcp, dot, doh (default "all")
+
+ICMP Options:
+      --icmp-count int     Pings per IP (default 1)
+      --icmp-privileged    Use raw sockets, requires root (default true)
+      --icmp-udp           Use UDP sockets, no root needed
+
+Tunnel Options:
+      --tunnel-type string   Types: all, dnstt, iodine, dnscat2, dns2tcp (default "all")
+      --tunnel-domain string Domain for detection
+
+Output:
+  -o, --output string      Output file, - for stdout (default "-")
+      --format string      Format: jsonl, parquet (default "jsonl")
+
+Performance:
+  -w, --workers int        Concurrent workers (default 100)
+  -t, --timeout int        Timeout per IP in seconds (default 5)
+  -r, --rate int           Max IPs/second, 0=unlimited (default 1000)
+
+Logging:
+  -q, --quiet              Suppress progress output
+  -v, --verbose            Verbose logging
+
+Other:
+  -h, --help               Show help
+      --version            Show version
+`

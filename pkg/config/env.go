@@ -32,14 +32,11 @@ type ScannerConfig struct {
 	IPChannelBuffer     int
 	ResultChannelBuffer int
 
-	// Output buffer sizes
-	MarkdownBufferSize int
-
 	// Advanced CLI defaults (overridable via CLI)
-	DefaultRateLimit     int
+	DefaultRateLimit      int
 	DefaultDNSConcurrency int
-	DefaultScanPorts     bool
-	DefaultTestDomains   string
+	DefaultScanPorts      bool
+	DefaultTestDomains    string
 }
 
 // DNSConfig contains DNS validation and security settings
@@ -64,12 +61,11 @@ func DefaultHTTPClientConfig() HTTPClientConfig {
 // DefaultScannerConfig returns default scanner configuration
 func DefaultScannerConfig() ScannerConfig {
 	return ScannerConfig{
-		IPChannelBuffer:       getEnvInt("SCANNER_IP_BUFFER", 1000),                               // 1000 IPs
-		ResultChannelBuffer:   getEnvInt("SCANNER_RESULT_BUFFER", 1000),                           // 1000 results
-		MarkdownBufferSize:    getEnvInt("MARKDOWN_BUFFER_SIZE", 8*1024),                          // 8KB
-		DefaultRateLimit:      getEnvInt("DEFAULT_RATE_LIMIT", 1000),                              // 1000 IPs/sec
-		DefaultDNSConcurrency: getEnvInt("DEFAULT_DNS_CONCURRENCY", 4),                            // 4 concurrent tests
-		DefaultScanPorts:      getEnvBool("DEFAULT_SCAN_PORTS", true),                             // Scan ports by default
+		IPChannelBuffer:       getEnvInt("SCANNER_IP_BUFFER", 1000),                                         // 1000 IPs
+		ResultChannelBuffer:   getEnvInt("SCANNER_RESULT_BUFFER", 1000),                                     // 1000 results
+		DefaultRateLimit:      getEnvInt("DEFAULT_RATE_LIMIT", 1000),                                        // 1000 IPs/sec
+		DefaultDNSConcurrency: getEnvInt("DEFAULT_DNS_CONCURRENCY", 4),                                      // 4 concurrent tests
+		DefaultScanPorts:      getEnvBool("DEFAULT_SCAN_PORTS", true),                                       // Scan ports by default
 		DefaultTestDomains:    getEnvString("DEFAULT_TEST_DOMAINS", "chatgpt.com,google.com,microsoft.com"), // Test domains
 	}
 }

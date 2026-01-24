@@ -15,10 +15,27 @@ import (
 
 // TestServers contains the test server addresses
 var TestServers = map[string]string{
-	"bind9":    "127.0.0.1:15353",
-	"unbound":  "127.0.0.1:15454",
-	"coredns":  "127.0.0.1:15555",
-	"doh":      "127.0.0.1:8443",
+	"bind9":   "127.0.0.1:15353",
+	"unbound": "127.0.0.1:15454",
+	"coredns": "127.0.0.1:15555",
+	"doh":     "127.0.0.1:8443",
+}
+
+// checkServerAvailable tests if a server is listening on the given address
+func checkServerAvailable(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// skipIfNoServer skips the test if the server isn't available
+func skipIfNoServer(t *testing.T, addr string) {
+	if !checkServerAvailable(addr) {
+		t.Skipf("Skipping: server %s not available", addr)
+	}
 }
 
 func TestUDPScanner(t *testing.T) {
@@ -58,6 +75,10 @@ func TestUDPScanner(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantSuccess {
+				skipIfNoServer(t, tt.server)
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
@@ -85,18 +106,18 @@ func TestTCPScanner(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		server     string
+		name        string
+		server      string
 		wantSuccess bool
 	}{
 		{
-			name:       "BIND9 TCP",
-			server:     "127.0.0.1:15353",
+			name:        "BIND9 TCP",
+			server:      "127.0.0.1:15353",
 			wantSuccess: true,
 		},
 		{
-			name:       "Unbound TCP",
-			server:     "127.0.0.1:15454",
+			name:        "Unbound TCP",
+			server:      "127.0.0.1:15454",
 			wantSuccess: true,
 		},
 	}
@@ -106,6 +127,10 @@ func TestTCPScanner(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantSuccess {
+				skipIfNoServer(t, tt.server)
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
@@ -596,16 +621,26 @@ func TestRecursionDetection(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Retry up to 3 times to handle transient network issues
+	var result *dns.TestResult
+	var err error
+	for i := 0; i < 3; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		result, err = dns.TestUDPDNS(ctx, "1.1.1.1:53")
+		cancel()
+
+		if err == nil && result != nil && result.SupportsRecursion {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	require.NoError(t, err, "DNS query should succeed")
+	require.NotNil(t, result, "Result should not be nil")
 
 	// Cloudflare is a recursive resolver
-	result, err := dns.TestUDPDNS(ctx, "1.1.1.1:53")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	assert.True(t, result.SupportsRecursion)
-	assert.Equal(t, "recursive", result.DNSServerType)
+	assert.True(t, result.SupportsRecursion, "Cloudflare should support recursion")
+	assert.Equal(t, "recursive", result.DNSServerType, "Cloudflare should be detected as recursive")
 }
 
 // =============================================================================

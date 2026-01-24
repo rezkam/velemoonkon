@@ -58,7 +58,7 @@ func DetectDNS2TCP(ctx context.Context, server string, domain string) (*DNS2TCPI
 // IsDNS2TCP determines if indicators suggest DNS2TCP tunnel
 func IsDNS2TCP(indicators *DNS2TCPIndicators) (bool, string) {
 	if indicators == nil {
-		return false, "low"
+		return false, ""
 	}
 
 	score := 0
@@ -88,5 +88,5 @@ func IsDNS2TCP(indicators *DNS2TCPIndicators) (bool, string) {
 		return true, "low"
 	}
 
-	return false, "low"
+	return false, ""
 }

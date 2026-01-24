@@ -119,7 +119,7 @@ func DetectDNScat2(ctx context.Context, server string, domain string) (*DNScat2I
 // IsDNScat2 determines if indicators suggest DNScat2 tunnel
 func IsDNScat2(indicators *DNScat2Indicators) (bool, string) {
 	if indicators == nil {
-		return false, "low"
+		return false, ""
 	}
 
 	score := 0
@@ -153,5 +153,5 @@ func IsDNScat2(indicators *DNScat2Indicators) (bool, string) {
 		return true, "low"
 	}
 
-	return false, "low"
+	return false, ""
 }

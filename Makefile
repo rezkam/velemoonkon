@@ -1,10 +1,11 @@
-.PHONY: all build build-release test test-unit test-integration test-docker-up test-docker-down test-full clean deps lint fmt coverage bench help
+.PHONY: all build build-release build-pgo pgo-profile pgo-clean test test-unit test-integration test-docker-up test-docker-down test-full clean deps lint fmt coverage bench help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 LDFLAGS_RELEASE := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
+PGO_PROFILE := default.pgo
 
 # Build the binary
 build:
@@ -13,6 +14,43 @@ build:
 # Build optimized release binary
 build-release:
 	go build -ldflags="$(LDFLAGS_RELEASE)" -trimpath -o lightning ./cmd/lightning
+
+# Build with Profile-Guided Optimization (Go 1.21+)
+# Uses default.pgo if present, falls back to standard build
+# PGO typically provides 3-7% performance improvement for I/O-bound applications
+build-pgo:
+	@if [ -f $(PGO_PROFILE) ]; then \
+		echo "Building with PGO profile: $(PGO_PROFILE)"; \
+		go build -pgo=$(PGO_PROFILE) -ldflags="$(LDFLAGS_RELEASE)" -trimpath -o lightning ./cmd/lightning; \
+	else \
+		echo "No PGO profile found, building without PGO"; \
+		go build -ldflags="$(LDFLAGS_RELEASE)" -trimpath -o lightning ./cmd/lightning; \
+	fi
+
+# Collect CPU profile for PGO optimization
+# Run representative workload to capture hot paths
+# Usage: make pgo-profile TARGETS="8.8.8.0/24 1.1.1.0/24"
+TARGETS ?= 8.8.8.0/28 1.1.1.0/28
+pgo-profile: build
+	@echo "Collecting CPU profile with targets: $(TARGETS)"
+	@mkdir -p profiles
+	./lightning $(TARGETS) -w 50 -r 500 -o /dev/null 2>/dev/null &
+	@PID=$$!; \
+	sleep 2; \
+	go tool pprof -proto -output=profiles/cpu.pprof http://localhost:6060/debug/pprof/profile?seconds=30 2>/dev/null || \
+	(echo "Note: pprof endpoint not available, using test-based profiling"; \
+	go test -cpuprofile=profiles/cpu.pprof -bench=. -benchtime=10s ./... 2>/dev/null); \
+	kill $$PID 2>/dev/null || true
+	@if [ -f profiles/cpu.pprof ]; then \
+		go tool pprof -proto profiles/cpu.pprof > $(PGO_PROFILE) 2>/dev/null && \
+		echo "PGO profile created: $(PGO_PROFILE)" || \
+		echo "Note: Could not create PGO profile"; \
+	fi
+
+# Clean PGO profiles
+pgo-clean:
+	rm -f $(PGO_PROFILE) profiles/*.pprof
+	rm -rf profiles
 
 # Run all tests
 test: test-unit
@@ -82,8 +120,17 @@ test-quick:
 
 help:
 	@echo "Available targets:"
-	@echo "  build            - Build the DNS scanner binary (with debug symbols)"
+	@echo ""
+	@echo "Build:"
+	@echo "  build            - Build the binary (with debug symbols)"
 	@echo "  build-release    - Build optimized release binary (stripped, with version info)"
+	@echo "  build-pgo        - Build with Profile-Guided Optimization (3-7% faster)"
+	@echo ""
+	@echo "PGO (Profile-Guided Optimization):"
+	@echo "  pgo-profile      - Collect CPU profile for PGO (run representative workload)"
+	@echo "  pgo-clean        - Remove PGO profiles"
+	@echo ""
+	@echo "Testing:"
 	@echo "  test             - Run unit tests"
 	@echo "  test-unit        - Run unit tests only"
 	@echo "  test-integration - Run integration tests with Docker"
@@ -93,6 +140,8 @@ help:
 	@echo "  test-quick       - Run quick tests against public servers"
 	@echo "  test-logs        - Show Docker container logs"
 	@echo "  test-rebuild     - Rebuild Docker containers from scratch"
+	@echo ""
+	@echo "Development:"
 	@echo "  clean            - Clean build artifacts"
 	@echo "  deps             - Install dependencies"
 	@echo "  lint             - Run linter"
